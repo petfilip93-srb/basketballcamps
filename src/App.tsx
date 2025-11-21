@@ -15,6 +15,7 @@ import { BasketballLoadingScreen } from './components/BasketballLoadingScreen';
 import { CampWithCountry } from './types';
 import { Menu, LogOut, Home, LayoutDashboard, Settings, Star, UserCircle, Calendar } from 'lucide-react';
 import logoImage from './assets/IMG_20250506_134050_289.webp';
+import { Session } from '@supabase/Bolt Database-js';
 
 function AppContent() {
   const { session, loading, userProfile, signOut } = useAuth();
