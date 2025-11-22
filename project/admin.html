@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel - Basketball Camps</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-50">
+  <div id="app"></div>
+
+  <script type="module">
+    const SUPABASE_URL = 'https://yazrpnhbzgnssjugjfsp.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlhenJwbmhiemduc3NqdWdqZnNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIzMzI2NzYsImV4cCI6MjA3NzkwODY3Nn0.ky4oRT9uBZKTEZAvGEX0HXMS9swB83Zwhpvqh13v3gM';
+
+    const { createClient } = supabase;
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let currentUser = null;
+    let pendingSubmissions = [];
+
+    async function checkAuth() {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+
+      if (!session) {
+        showLoginForm();
+        return false;
+      }
+
+      const { data: profile } = await supabaseClient
+        .from('users_profile')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (!profile || profile.user_type !== 'admin') {
+        document.getElementById('app').innerHTML = `
+          <div class="min-h-screen flex items-center justify-center p-4">
+            <div class="max-w-md w-full p-6 bg-red-50 border border-red-200 rounded-lg">
+              <h2 class="text-xl font-bold text-red-700 mb-2">Access Denied</h2>
+              <p class="text-red-600">Only administrators can access this page.</p>
+              <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                Try Again
+              </button>
+            </div>
+          </div>
+        `;
+        return false;
+      }
+
+      currentUser = profile;
+      return true;
+    }
+
+    function showLoginForm() {
+      document.getElementById('app').innerHTML = `
+        <div class="min-h-screen flex items-center justify-center p-4">
+          <div class="max-w-md w-full p-8 bg-white border border-slate-200 rounded-lg shadow-lg">
+            <h1 class="text-3xl font-bold text-slate-900 mb-6 text-center">Admin Login</h1>
+            <form id="loginForm" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <input type="email" id="email" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                <div class="relative">
+                  <input type="password" id="password" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                  <button type="button" id="togglePassword" class="absolute right-3 top-2.5 text-slate-500 hover:text-slate-700">
+                    <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <svg id="eyeOffIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                      <line x1="1" y1="1" x2="23" y2="23"></line>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div id="error" class="text-red-600 text-sm hidden"></div>
+              <button type="submit" class="w-full px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">
+                Sign In
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+
+      const togglePasswordBtn = document.getElementById('togglePassword');
+      const passwordInput = document.getElementById('password');
+      const eyeIcon = document.getElementById('eyeIcon');
+      const eyeOffIcon = document.getElementById('eyeOffIcon');
+
+      togglePasswordBtn.addEventListener('click', () => {
+        if (passwordInput.type === 'password') {
+          passwordInput.type = 'text';
+          eyeIcon.classList.add('hidden');
+          eyeOffIcon.classList.remove('hidden');
+        } else {
+          passwordInput.type = 'password';
+          eyeIcon.classList.remove('hidden');
+          eyeOffIcon.classList.add('hidden');
+        }
+      });
+
+      document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const errorDiv = document.getElementById('error');
+
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+        if (error) {
+          errorDiv.textContent = error.message;
+          errorDiv.classList.remove('hidden');
+        } else {
+          location.reload();
+        }
+      });
+    }
+
+    async function loadSubmissions() {
+      const { data, error } = await supabaseClient
+        .from('camp_submissions')
+        .select('*, country:countries(name)')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading submissions:', error);
+        return;
+      }
+
+      pendingSubmissions = data || [];
+      renderDashboard();
+    }
+
+    async function approveSubmission(submissionId) {
+      if (!confirm('Are you sure you want to approve this camp?')) return;
+
+      try {
+        const submission = pendingSubmissions.find(s => s.id === submissionId);
+        if (!submission) throw new Error('Submission not found');
+
+        const { data: dates } = await supabaseClient
+          .from('camp_submission_dates')
+          .select('*')
+          .eq('submission_id', submissionId)
+          .order('start_date');
+
+        const { data: images } = await supabaseClient
+          .from('camp_submission_images')
+          .select('*')
+          .eq('submission_id', submissionId)
+          .order('image_order');
+
+        if (!dates || dates.length === 0) {
+          alert('No dates found for this submission');
+          return;
+        }
+
+        for (const dateRange of dates) {
+          const { data: camp, error: campError } = await supabaseClient
+            .from('camps')
+            .insert({
+              camp_name: submission.camp_name,
+              camp_email: submission.camp_email,
+              country_id: submission.country_id,
+              location: submission.location,
+              description: submission.description,
+              start_date: dateRange.start_date,
+              end_date: dateRange.end_date,
+              duration_days: dateRange.duration_days,
+              age_group_min: submission.age_group_min,
+              age_group_max: submission.age_group_max,
+              gender: submission.gender,
+              capacity: submission.capacity,
+              price: dateRange.price,
+              owner_id: submission.owner_id,
+              status: 'approved'
+            })
+            .select()
+            .single();
+
+          if (campError) throw campError;
+
+          if (images && images.length > 0) {
+            const campImages = images.map(img => ({
+              camp_id: camp.id,
+              image_url: img.image_url,
+              image_order: img.image_order
+            }));
+
+            const { error: imagesError } = await supabaseClient
+              .from('camp_images')
+              .insert(campImages);
+
+            if (imagesError) throw imagesError;
+          }
+        }
+
+        const { error: updateError } = await supabaseClient
+          .from('camp_submissions')
+          .update({ status: 'approved' })
+          .eq('id', submissionId);
+
+        if (updateError) throw updateError;
+
+        alert('Camp approved successfully!');
+        loadSubmissions();
+      } catch (err) {
+        alert('Failed to approve: ' + err.message);
+      }
+    }
+
+    async function rejectSubmission(submissionId) {
+      const reason = prompt('Enter rejection reason:');
+      if (!reason || !reason.trim()) return;
+
+      try {
+        const { error } = await supabaseClient
+          .from('camp_submissions')
+          .update({
+            status: 'rejected',
+            rejection_reason: reason
+          })
+          .eq('id', submissionId);
+
+        if (error) throw error;
+
+        alert('Camp rejected successfully!');
+        loadSubmissions();
+      } catch (err) {
+        alert('Failed to reject: ' + err.message);
+      }
+    }
+
+    async function signOut() {
+      await supabaseClient.auth.signOut();
+      location.reload();
+    }
+
+    function renderDashboard() {
+      const submissionCards = pendingSubmissions.map(submission => {
+        return `
+          <div class="border-2 border-slate-200 rounded-lg p-6 mb-6">
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <h3 class="text-xl font-bold text-slate-900 mb-1">${submission.camp_name}</h3>
+                <p class="text-slate-600">${submission.location}, ${submission.country?.name || ''}</p>
+                <p class="text-sm text-slate-500 mt-1">Submitted: ${new Date(submission.created_at).toLocaleDateString()}</p>
+              </div>
+            </div>
+
+            ${submission.owner_name ? `
+              <div class="mb-4 p-4 bg-slate-50 rounded-lg">
+                <h4 class="font-semibold text-slate-900 mb-2">Owner Information</h4>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                  <div><span class="text-slate-600">Name:</span> <span class="font-medium">${submission.owner_name}</span></div>
+                  <div><span class="text-slate-600">Email:</span> <a href="mailto:${submission.owner_email}" class="font-medium text-blue-600 hover:underline">${submission.owner_email}</a></div>
+                  <div><span class="text-slate-600">Phone:</span> <span class="font-medium">${submission.owner_phone || 'N/A'}</span></div>
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 py-4 border-y border-slate-200 text-sm">
+              <div>
+                <p class="text-xs text-slate-600 uppercase font-semibold mb-1">Age Group</p>
+                <p class="font-medium">${submission.age_group_min}-${submission.age_group_max} years</p>
+              </div>
+              <div>
+                <p class="text-xs text-slate-600 uppercase font-semibold mb-1">Gender</p>
+                <p class="font-medium capitalize">${submission.gender}</p>
+              </div>
+              <div>
+                <p class="text-xs text-slate-600 uppercase font-semibold mb-1">Capacity</p>
+                <p class="font-medium">${submission.capacity} participants</p>
+              </div>
+              <div>
+                <p class="text-xs text-slate-600 uppercase font-semibold mb-1">Camp Email</p>
+                <a href="mailto:${submission.camp_email}" class="font-medium text-blue-600 hover:underline">${submission.camp_email}</a>
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <h4 class="font-semibold text-slate-900 mb-2">Description</h4>
+              <p class="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">${submission.description}</p>
+            </div>
+
+            <div class="flex gap-3">
+              <button onclick="approveSubmission('${submission.id}')" class="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">
+                ✓ Approve Camp
+              </button>
+              <button onclick="rejectSubmission('${submission.id}')" class="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">
+                ✗ Reject Camp
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('app').innerHTML = `
+        <div class="min-h-screen bg-slate-50">
+          <div class="bg-gradient-to-r from-orange-600 to-orange-500 text-white py-8">
+            <div class="max-w-7xl mx-auto px-4 flex items-center justify-between">
+              <div>
+                <h1 class="text-3xl font-bold mb-1">Admin Panel</h1>
+                <p class="text-orange-100">Camp Approval Management</p>
+              </div>
+              <div class="flex items-center gap-4">
+                <span class="text-sm">Welcome, ${currentUser.full_name}</span>
+                <button onclick="signOut()" class="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors">
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="max-w-7xl mx-auto px-4 py-8">
+            <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-slate-900">
+                  Pending Camp Submissions (${pendingSubmissions.length})
+                </h2>
+                <button onclick="location.reload()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium">
+                  🔄 Refresh
+                </button>
+              </div>
+
+              ${pendingSubmissions.length === 0 ? `
+                <div class="text-center py-12">
+                  <p class="text-slate-600 text-lg">No pending submissions to review</p>
+                </div>
+              ` : submissionCards}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    window.approveSubmission = approveSubmission;
+    window.rejectSubmission = rejectSubmission;
+    window.signOut = signOut;
+
+    async function init() {
+      const isAuthenticated = await checkAuth();
+      if (isAuthenticated) {
+        await loadSubmissions();
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
